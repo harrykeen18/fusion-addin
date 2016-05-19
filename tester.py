@@ -7,27 +7,29 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 import os, sys 
 
 #get the path of add-in
-my_addin_path = os.path.dirname(os.path.realpath(__file__)) 
+ADDIN_PATH = os.path.dirname(os.path.realpath(__file__))
 #hard coded the absolute path of my add-in
-print(my_addin_path)
+print(ADDIN_PATH)
 
 #add the path to the searchable path collection
-if not my_addin_path in sys.path:
-  sys.path.append(my_addin_path)
+if not ADDIN_PATH in sys.path:
+  sys.path.append(ADDIN_PATH)
 
 from xlrd import open_workbook
+#from random import randint
 
 
-FEATURE_DICT = {}
-LAYER_DICT = import_prn()
+FEATURE_DICT = {'HOLES': []}
+LAYER_DICT = {}
+MODEL_LAYER_DICT = {}
 
 def run(context):
   
   try:
-
-    app = adsk.core.Application.get()
+    LAYER_DICT = import_xlsx(os.path.join(ADDIN_PATH, 'assets', 'LAYERCOLOURS - new.xlsx'))      
     
-    #ui = app.userInterface
+    app = adsk.core.Application.get()
+    ui = app.userInterface
     
     design = app.activeProduct
 
@@ -128,11 +130,20 @@ def run(context):
                   #NON THRU HOLE
                   #find distance between faces via dot product.
 
-                  depth = get_depth(face, top_face_point)
-                  #print(depth)
-                  print('hole ' + str(depth))
+                  depth = 10 * get_depth(face, top_face_point)
+                  center = [i * 3 for i in edge.geometry.center.asArray()]
+                  radius = 10 * edge.geometry.radius
+                  #print('hole ' + str(depth))
 
+                  layer_key = 'TOPHOLES'
+                  layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+                  layer_col = layer_colour(layer_key, depth, LAYER_DICT)
+                  
+                  make_model_layer_dict(layer_name, layer_col)
+                  #print(layer_key, layer_name, layer_col)
 
+                  hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
+                  FEATURE_DICT['HOLES'].append(hole_dict)
 
                 else:
                   #INSIDE NON THRU CUT
@@ -142,6 +153,12 @@ def run(context):
             #inner loops
             else:
               print('some internal feature') #don't need to worry about this.
+      
+      #print(FEATURE_DICT)
+      #print(MODEL_LAYER_DICT)
+
+    gen_dxf_list(FEATURE_DICT)
+
   except:
     if ui:
       print('Failed:\n{}'.format(traceback.format_exc()))
@@ -149,12 +166,21 @@ def run(context):
 
 #def write_dxf(): #give all the dictionaries.
 
+def make_model_layer_dict(layer_name, layer_col):
+  #adding random colour at the moment, figure out how to get rgb values instead of AutoCAD Color Index numbers 
+  if layer_name not in MODEL_LAYER_DICT.keys():
+    global MODEL_LAYER_DICT
+    MODEL_LAYER_DICT[layer_name] = 220
 
-#def layer_name():
+
+def layer_colour(layer_key, depth, LAYER_DICT):
+  temp_array = LAYER_DICT[layer_key]
+  layer_rgb = temp_array[int(depth) - 1]
+  return layer_rgb
 
 
-def import_prn():
-  file_loc = '/Users/harry/Dropbox (OpenDesk)/06_Production/06_Software/CADLine Plugin/excel files/LAYERCOLOURS - new.xlsx'
+def import_xlsx(file_loc):
+  #file_loc = '/Users/harry/Dropbox (OpenDesk)/06_Production/06_Software/CADLine Plugin/excel files/LAYERCOLOURS - new.xlsx'
   wb = open_workbook(file_loc)
 
   sheet = wb.sheet_by_index(0)
@@ -170,10 +196,33 @@ def import_prn():
     
     #print(col_values_list)
     sheetdict[sheet.cell_value(0, colnum)] = col_values_list
-  #print(sheetdict)
+  print(sheetdict.keys())
 
   return sheetdict
 
+
+def gen_dxf_list(FEATURE_DICT):
+
+  dxf_list = []
+  dxf_list = start_section(dxf_list)
+
+  dxf_list = start_layer(dxf_list)
+  
+  for layer_element in MODEL_LAYER_DICT:
+    #print(layer_element)
+    dxf_list = add_layer(dxf_list, layer_element, MODEL_LAYER_DICT[layer_element])
+  
+  dxf_list = end_layer(dxf_list)
+  dxf_list = end_section(dxf_list)
+
+  dxf_list = start_section(dxf_list)
+  dxf_list = start_entities(dxf_list)
+
+
+
+  print(dxf_list)
+
+  #for features in FEATURE_DICT():
 
 
 def get_depth(face, top_face_point):
@@ -226,15 +275,15 @@ def start_layer(dxf):
   return dxf
 
 
-def add_layer(dxf, layer, colour):
+def add_layer(dxf, layer_name, layer_colour):
   dxf.append('  0')
   dxf.append('LAYER')
   dxf.append('  2')
-  dxf.append(layer)
+  dxf.append(layer_name)
   dxf.append(' 70')
   dxf.append('     0')
   dxf.append(' 62')
-  dxf.append('   ' + colour)
+  dxf.append('   ' + str(layer_colour))
   dxf.append('  6')
   dxf.append('CONTINUOUS')
 

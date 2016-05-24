@@ -8,24 +8,39 @@ import os, sys
 
 #get the path of add-in
 ADDIN_PATH = os.path.dirname(os.path.realpath(__file__))
-#hard coded the absolute path of my add-in
-print(ADDIN_PATH)
+#print(ADDIN_PATH)
 
 #add the path to the searchable path collection
 if not ADDIN_PATH in sys.path:
   sys.path.append(ADDIN_PATH)
 
 from xlrd import open_workbook
-#from random import randint
+#import numpy
+#import dxfarc
+# import operator
+import math
 
 
-FEATURE_DICT = {'HOLES': []}
+FEATURE_DICT = {'HOLES': [], 'TOPCUTINSIDE': [], 'TOPCUTOUTSIDE': [], 'TOPPOCKETINSIDE': []}
+# REVCUTINSIDE
+# TOPCUTINLINE
+# REVCUTOUTSIDE
+# REVCUTINLINE
+# TOPCUTOUTSIDE
+# REVHOLES
+# TOPPOCKETINSIDE
+# TOPCUTINSIDE
+# TOPHOLES
+# TOPPOCKETOUTSIDE
+# REVPOCKETOUTSIDE
+# REVPOCKETINSIDE
 LAYER_DICT = {}
 MODEL_LAYER_DICT = {}
 
 def run(context):
   
   try:
+    global LAYER_DICT
     LAYER_DICT = import_xlsx(os.path.join(ADDIN_PATH, 'assets', 'LAYERCOLOURS - new.xlsx'))      
     
     app = adsk.core.Application.get()
@@ -35,11 +50,15 @@ def run(context):
 
     #get the root component of the active design.
     rootComp = design.rootComponent
-    
-    #find face features
-    for feature in rootComp.features:
 
-      all_faces = feature.faces
+    #print(rootComp.bRepBodies.count)
+
+    for body in rootComp.bRepBodies:
+
+    #find face features
+    #for feature in rootComp.features:
+
+      all_faces = body.faces
       #print(all_faces.count)
       
       faces_areas = []
@@ -47,6 +66,9 @@ def run(context):
       for face in all_faces:
         faces_areas.append(face.area)
         #print(face.area)
+
+        if face.area in range(13, 15):
+          print(face.area)
 
       #find two largest face areas - top and bottom face
       #if both are the same (part with no features)
@@ -60,18 +82,22 @@ def run(context):
       next_biggest_area_index = faces_areas.index(next_biggest_area)
       #print(next_biggest_area_index)
 
-      if biggest_area == next_biggest_area:
+      if int(biggest_area) == int(next_biggest_area):
         #part with no features on it - take bottom face as one with lowest z value (not great solution as stuff could be orientated in a different place.)
 
-        biggest_area_point = all_faces[biggest_area_index].pointOnFace().asArray
-        next_biggest_area_point = all_faces[next_biggest_area_index].pointOnFace().asArray
+        biggest_area_point = all_faces[biggest_area_index].pointOnFace.asArray()
+        next_biggest_area_point = all_faces[next_biggest_area_index].pointOnFace.asArray()
+
+        print('1 - ' + str(biggest_area))
+        print('2 - ' + str(next_biggest_area))
 
         if biggest_area_point[2] < next_biggest_area_point[2]:
+          
           back_face_ind = biggest_area_index
           top_face_ind = next_biggest_area_index
         else:
           back_face_ind = next_biggest_area_index
-          top_face_ind = biggest_area
+          top_face_ind = biggest_area_index
       else:
         back_face_ind = biggest_area_index
         top_face_ind = next_biggest_area_index
@@ -84,24 +110,63 @@ def run(context):
       top_face = all_faces[top_face_ind]
       #print(str(back_face.loops.count))
 
+      #get point for referecne on top face
+      top_face_point = top_face.pointOnFace
+
       for loop in back_face.loops:
         if loop.isOuter:
-          #out_profile = loop.edges
-          print('outer profile')
+          #outside profile of part
+          #print('outer profile')
+
+          outer_profile = get_outer_profile(loop)
+
+          depth = 10 * get_depth(back_face, top_face_point)
+
+          layer_key = 'TOPCUTOUTSIDE'
+          #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+          layer_name = 'TOP-CUT-OUTSIDE-' + str(int(depth)) + 'MM'
+
+          add_cut(layer_key, layer_name, depth, outer_profile)
         
         #inner loops
         else:
           for edge in loop.edges:
             if edge.geometry.curveType == 2:
               #THRU HOLE
-              print('thru hole')
+              #print('thru hole')
+              depth = 10 * get_depth(face, top_face_point)
+              center = [i * 10 for i in edge.geometry.center.asArray()]
+              radius = 10 * edge.geometry.radius
+              #print('hole ' + str(depth))
+
+              layer_key = 'TOPHOLES'
+              #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+              layer_name = 'TOP-HOLE-' + str(int(2*radius)) + 'MM-DIAM_' + str(int(depth)) + 'MM'
+              layer_col = layer_colour(layer_key, depth)
+              
+              make_model_layer_dict(layer_name, layer_col)
+              #print(layer_key, layer_name, layer_col)
+
+              hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
+              FEATURE_DICT['HOLES'].append(hole_dict)
+
               break
+
             else:
               #INSIDE THRU CUT
-              print('thru inside cut')
+              #print('thru inside cut')
+
+              outer_profile = get_outer_profile(loop)
+
+              depth = 10 * get_depth(back_face, top_face_point)
+              layer_key = 'TOPCUTINSIDE'
+              #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+              layer_name = 'TOP-CUT-INSIDE-' + str(int(depth)) + 'MM'
+
+              add_cut(layer_key, layer_name, depth, outer_profile)
+
               break
-          
-      print('--------------------------------')
+              
 
       #top and bottom faces index
       exclude_faces = [biggest_area_index, next_biggest_area_index]
@@ -113,9 +178,6 @@ def run(context):
         else:
           exclude_faces.append(i)
       #print(exclude_faces)
-
-      #get point for referecne on top face
-      top_face_point = top_face.pointOnFace
       
       #iterate through all faces that arn't exluded
       for index, face in enumerate(all_faces):
@@ -131,13 +193,14 @@ def run(context):
                   #find distance between faces via dot product.
 
                   depth = 10 * get_depth(face, top_face_point)
-                  center = [i * 3 for i in edge.geometry.center.asArray()]
+                  center = [i * 10 for i in edge.geometry.center.asArray()]
                   radius = 10 * edge.geometry.radius
                   #print('hole ' + str(depth))
 
                   layer_key = 'TOPHOLES'
-                  layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
-                  layer_col = layer_colour(layer_key, depth, LAYER_DICT)
+                  #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+                  layer_name = 'TOP-HOLE-' + str(int(2*radius)) + 'MM-DIAM_' + str(int(depth)) + 'MM'
+                  layer_col = layer_colour(layer_key, depth)
                   
                   make_model_layer_dict(layer_name, layer_col)
                   #print(layer_key, layer_name, layer_col)
@@ -145,39 +208,153 @@ def run(context):
                   hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
                   FEATURE_DICT['HOLES'].append(hole_dict)
 
+                  break
+
                 else:
                   #INSIDE NON THRU CUT
-                  print('inside cut')
+                  #print('inside cut')
+
+                  outer_profile = get_outer_profile(loop)
+
+                  depth = 10 * get_depth(face, top_face_point)
+
+                  layer_key = 'TOPPOCKETINSIDE'
+                  #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
+                  layer_name = 'TOP-POCKET-INSIDE-' + str(int(depth)) + 'MM'
+                  
+                  add_cut(layer_key, layer_name, depth, outer_profile)
+
                   break
-            
+
             #inner loops
             else:
               print('some internal feature') #don't need to worry about this.
-      
-      #print(FEATURE_DICT)
-      #print(MODEL_LAYER_DICT)
+    
+    for keys in FEATURE_DICT.keys():
+      n = 0
+      for arrays in FEATURE_DICT[keys]:
+        
+        n += 1
 
-    gen_dxf_list(FEATURE_DICT)
+      print(keys + ' ' + str(n))
+    
+
+    #print(MODEL_LAYER_DICT)
+
+    dxf_list = gen_dxf_list(FEATURE_DICT)
+    write_dxf(dxf_list)
+    #ui.messageBox('done!')
 
   except:
     if ui:
       print('Failed:\n{}'.format(traceback.format_exc()))
 
 
-#def write_dxf(): #give all the dictionaries.
+def write_dxf(dxf_list):
+  file_loc = '/Users/harry/Documents/github/opendesk-on-demand/wip_docs/dxf-ouputs/test.dxf'
+
+  with open(file_loc, "w"):
+      pass    
+  
+  dxf = open(file_loc, 'w')
+
+  for line in dxf_list:
+    dxf.write("%s\n" % line)
+
+
+def get_outer_profile(loop):
+  outer_profile = []
+
+  for edge in loop.edges:
+    start_point = [i * 10 for i in edge.startVertex.geometry.asArray()]
+    outer_profile.append(start_point)
+
+    if edge.geometry.curveType == 1:
+      bulge = get_bulge(edge)
+      outer_profile[len(outer_profile) - 1].append(bulge)
+
+  #outer_profile.append(loop.edges[0].startVertex.geometry.asArray())
+  
+  #outer_profile.append(outer_profile[0])
+  
+  for n in outer_profile:
+    print(n)
+
+  return outer_profile
+
+def get_bulge(edge):
+  # print('arc ' + str(edge.startVertex.geometry.asArray()) + ' ' + str(edge.endVertex.geometry.asArray()))
+  # print('arc center ' + str(edge.geometry.center.asArray()))
+
+  Ax = 10 * edge.startVertex.geometry.asArray()[0]
+  Ay = 10 * edge.startVertex.geometry.asArray()[1]
+  Bx = 10 * edge.endVertex.geometry.asArray()[0]
+  By = 10 * edge.endVertex.geometry.asArray()[1]
+
+  print('Ax - ' + str(Ax))
+  print('Ay - ' + str(Ay))
+  print('Bx - ' + str(Bx))
+  print('By - ' + str(By))
+
+  cenx = 10 * edge.geometry.center.asArray()[0]
+  ceny = 10 * edge.geometry.center.asArray()[1]
+  rad = 10 * edge.geometry.radius
+
+  dist = ((By - Ay) * cenx - (Bx - Ax) * ceny + Bx * Ay - By * Ax)
+  distance = math.sqrt(math.pow((By - Ay), 2) + math.pow((Bx - Ax), 2))
+  center_to_line = math.sqrt(math.pow((dist / distance), 2))
+  bulge = - (rad - center_to_line) / (distance / 2)
+
+  print('radius - ' + str(rad))
+  print('dist - ' + str(dist))
+  print('distance - ' + str(distance))
+  print('center_to_line - ' + str(center_to_line))
+  print('bulge - ' + str(bulge))
+
+  return bulge
+
+def add_cut(layer_key, layer_name, depth, outer_profile):
+
+  global LAYER_DICT
+  layer_col = layer_colour(layer_key, depth)
+                  
+  make_model_layer_dict(layer_name, layer_col)
+  #print(layer_key, layer_name, layer_col)
+
+  cut_dict = {'layer_name': layer_name, 'points': outer_profile}
+  FEATURE_DICT[layer_key].append(cut_dict)
+
 
 def make_model_layer_dict(layer_name, layer_col):
-  #adding random colour at the moment, figure out how to get rgb values instead of AutoCAD Color Index numbers 
   if layer_name not in MODEL_LAYER_DICT.keys():
-    global MODEL_LAYER_DICT
-    MODEL_LAYER_DICT[layer_name] = 220
+      global MODEL_LAYER_DICT
+      MODEL_LAYER_DICT[layer_name] = layer_col[3]
 
 
-def layer_colour(layer_key, depth, LAYER_DICT):
+def layer_colour(layer_key, depth):
+
+  global LAYER_DICT
+
   temp_array = LAYER_DICT[layer_key]
   layer_rgb = temp_array[int(depth) - 1]
+
+  #print(layer_rgb)
+
   return layer_rgb
 
+  #32-bit integer value. When used with True Color; a 32-bit integer representing a 24-bit color value. The high-order byte (8 bits) is 0, the low-order byte an unsigned char holding the Blue value (0-255), then the Green value, and the next-to-high order byte is the Red Value. Convering this integer value to hexadecimal yields the following bit mask: 0x00RRGGBB. For example, a true color with Red==200, Green==100 and Blue==50 is 0x00C86432, and in DXF, in decimal, 13132850
+
+  #build a layercoulours.xlsx doc where each cell has an array of 4 elements [R, G, B, Autocad 256 colour]
+  #add a 420 tag with the 'decimal' colour value to describe the real RGB colour
+
+    #     2
+    # tester
+    #  70
+    #      0
+    #  62
+    #    220
+    # 420
+    #  16711865
 
 def import_xlsx(file_loc):
   #file_loc = '/Users/harry/Dropbox (OpenDesk)/06_Production/06_Software/CADLine Plugin/excel files/LAYERCOLOURS - new.xlsx'
@@ -196,7 +373,9 @@ def import_xlsx(file_loc):
     
     #print(col_values_list)
     sheetdict[sheet.cell_value(0, colnum)] = col_values_list
-  print(sheetdict.keys())
+  #print(sheetdict.keys())
+
+  #print(sheetdict)
 
   return sheetdict
 
@@ -218,11 +397,46 @@ def gen_dxf_list(FEATURE_DICT):
   dxf_list = start_section(dxf_list)
   dxf_list = start_entities(dxf_list)
 
+    
+  for holes in FEATURE_DICT['HOLES']:
+    #print(holes.count)
+    #hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
+    dxf_list = add_hole(dxf_list, holes['diameter'], holes['center'], holes['layer_name'])
 
+  for cuts in FEATURE_DICT['TOPCUTINSIDE']:
+    #cut_inside_dict = {'layer_name': layer_name, 'points': outer_profile}
+    #colour = str(6)
+    start_polyline(dxf_list, cuts['layer_name'])#, colour)
+    for point in cuts['points']:
+      #print(point)
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+    end_polyline(dxf_list)
 
-  print(dxf_list)
+  for cuts in FEATURE_DICT['TOPCUTOUTSIDE']:
+    #cut_inside_dict = {'layer_name': layer_name, 'points': outer_profile}
+    #colour = str(6)
+    start_polyline(dxf_list, cuts['layer_name'])#, colour)
+    for point in cuts['points']:
+      #print(point)
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+    end_polyline(dxf_list)
 
-  #for features in FEATURE_DICT():
+  for cuts in FEATURE_DICT['TOPPOCKETINSIDE']:
+    #cut_inside_dict = {'layer_name': layer_name, 'points': outer_profile}
+    #colour = str(6)
+    start_polyline(dxf_list, cuts['layer_name'])#, colour)
+    for point in cuts['points']:
+      #print(point)
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+    end_polyline(dxf_list)
+
+  dxf_list = end_section(dxf_list)
+  dxf_list = end_dxf(dxf_list)
+
+  # for el in dxf_list:
+  #   print(el)
+
+  return dxf_list
 
 
 def get_depth(face, top_face_point):
@@ -248,13 +462,15 @@ def end_section(dxf):
 def end_dxf(dxf):
   dxf.append("  0")
   dxf.append("SEQEND")
+  dxf.append("  0")
+  dxf.append("EOF")
 
   return dxf
 
 
 def start_layer(dxf):
   dxf.append('  2')
-  dxf.append('TABLE')
+  dxf.append('TABLES')
   dxf.append('  0')
   dxf.append('TABLE')
   dxf.append('  2')
@@ -304,13 +520,15 @@ def start_entities(dxf):
   return dxf
 
 
-def start_polyline(dxf, layer, colour):
+def start_polyline(dxf, layer):#, colour):
   dxf.append('  0')
   dxf.append('POLYLINE')
   dxf.append('8')
   dxf.append(layer)
   dxf.append(' 66')
-  dxf.append(colour)
+  dxf.append('100')
+  dxf.append(' 70')
+  dxf.append('1')
   dxf.append(' 10')
   dxf.append('0.0')
   dxf.append(' 20')
@@ -321,7 +539,7 @@ def start_polyline(dxf, layer, colour):
   return dxf
 
 
-def add_vertex(dxf, layer, point, bulge=0.0):
+def add_vertex(dxf, layer, point, bulge=str(0.0)):
   dxf.append('  0')
   dxf.append('VERTEX')
   dxf.append('  8')
@@ -333,6 +551,10 @@ def add_vertex(dxf, layer, point, bulge=0.0):
   dxf.append(' 30')
   dxf.append(str(point[2]))
 
+  if len(point) == 4:
+    dxf.append(' 42')
+    dxf.append(str(point[3]))
+
   return dxf
 
 
@@ -343,20 +565,30 @@ def end_polyline(dxf):
   return dxf
 
 
-def circle(dxf, diameter, point, layer):
+def add_hole(dxf, diameter, point, layer):
+
+  x = point[0]
+  y = point[1]
+  z = point[2]
+
+  # x = 10 * x
+  # y = 10 * y
+  # z = 10 * z
+
+  #print(x, y, z)
 
   dxf.append("  0")
   dxf.append("CIRCLE")
   dxf.append("  8")
   dxf.append(layer)
   dxf.append(' 10')
-  dxf.append(str(point[0]))
+  dxf.append(str(x))
   dxf.append(' 20')
-  dxf.append(str(point[1]))
+  dxf.append(str(y))
   dxf.append(' 30')
-  dxf.append(str(point[2]))
+  dxf.append(str(z))
   dxf.append(" 40")
-  dxf.append(diameter)
+  dxf.append(str(diameter))
 
   return dxf
 

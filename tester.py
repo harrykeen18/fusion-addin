@@ -268,15 +268,16 @@ def get_outer_profile(loop, back):
   outer_profile = []
 
   # get the bulge values in the correct vertex. All curves on the back face use start vertex and all non back faces use end vertex.
-  # for edge in loop.edges:
-  for i in range(0,6):
-    edge = loop.edges[i]
+  for edge in loop.edges:
+  # for i in range(0,6):
+  #   edge = loop.edges[i]
     if back == True:
       point = [i * 10 for i in edge.startVertex.geometry.asArray()]
     else:
       point = [i * 10 for i in edge.endVertex.geometry.asArray()]
     
     outer_profile.append(point)
+    print(len(outer_profile))
 
     #got to find out if the curve is clockwise or not 
     if edge.geometry.curveType == 1:
@@ -290,17 +291,18 @@ def get_outer_profile(loop, back):
       print(str(edge.body.name))
       
       clockwise = bulge_direction(a, b, c)
+      print(bulge)
 
       if back == True:
         if clockwise == True:
-          outer_profile[len(outer_profile) - 1].append(bulge)
-        else:
           outer_profile[len(outer_profile) - 1].append(-bulge)
+        else:
+          outer_profile[len(outer_profile) - 1].append(bulge)
       else:
         if clockwise == True:
-          outer_profile[len(outer_profile) - 1].append(-bulge)
-        else:
           outer_profile[len(outer_profile) - 1].append(bulge)
+        else:
+          outer_profile[len(outer_profile) - 1].append(-bulge)
 
   
   # for n in outer_profile:
@@ -319,78 +321,42 @@ def bulge_direction(a, b, c):
   # v
   # o b
 
-  ab = []
-  ca = []
-  ab_dot_ca = []
+  v=[]
+  w=[]
 
   for i, el in enumerate(a):
-    ab.append(10 * b[i] - 10 * a[i])
+    w.append(10 * b[i] - 10 * a[i])
   for i, el in enumerate(a):
-    ca.append(10 * a[i] - c[i])
+    v.append(10 * a[i] - c[i])
 
-  # print(ab,ca)
-
-  #dot product
-  for i, el in enumerate(ab):
-    ab_dot_ca.append(ab[i] * ca[i])
-
-  #print(ab_dot_ca)
-
-  dot = ab_dot_ca[0] + ab_dot_ca[1] + ab_dot_ca[2]
-
-  # print('dot '+ str(dot))
-
-  mag_ab = math.sqrt(math.pow(ab[0],2) + math.pow(ab[1],2) + math.pow(ab[2],2))
-  mag_ca = math.sqrt(math.pow(ca[0],2) + math.pow(ca[1],2) + math.pow(ca[2],2))
-
-  # print(dot, mag_ca * mag_ab)
-
-  #If v1 = [x1,y1] and v2 = [x2,y2]
-  #a = atan2d( x1*y2 - y1*x2, x1*x2 + y1*y2);
-
+  # print(v)
+  # print(w)
+  
   try:
-    other_theta = math.atan((ca[0] * ab[1] - ab[0] * ca[1]) / (ca[0] * ab[0] + ca[1] * ab[1]))
-    print('other_theta ' + str(other_theta * 360 / (2 * math.pi)))
+    cosx=(v[0]*w[0]+v[1]*w[1])/(math.sqrt(v[0]**2+v[1]**2)*math.sqrt(w[0]**2+w[1]**2))
+    rad=math.acos(cosx)
+    inner=rad*180/pi # returns degree
+
+    det = v[0]*w[1]-v[1]*w[0]
+
+    # print(det)
+
+    if det<0: #this is a property of the det. If the det < 0 then B is clockwise of A
+      print(inner)
+      angle = inner
+    else: # if the det > 0 then A is immediately clockwise of B
+      print(360-inner)
+      angle = 360-inner
+
+    if angle < 180:
+      clockwise = True
+    else:
+      clockwise = False
+
+    return clockwise
   except:
-    other_theta = 0.0
-
-  # theta = math.acos(dot / (mag_ab * mag_ca))
-
-  # theta = theta * 360 / (2 * math.pi)
-
-  # print('theta ' + str(theta))
-
-  # if theta < 180:
-  #   clockwise = True
-  # else:
-  #   clockwise = False
-
-  if other_theta > 0:
-    clockwise = True
-  else:
-    clockwise = False
-
-
-  return clockwise
-
-  v=[ax-cx,ay-cy]
-  w=[bx-ax,by-ay]
-
-  print v
-  print w
-    
-  cosx=(v[0]*w[0]+v[1]*w[1])/(sqrt(v[0]**2+v[1]**2)*sqrt(w[0]**2+w[1]**2))
-  rad=acos(cosx)
-  inner=rad*180/pi # returns degree
-
-  det = v[0]*w[1]-v[1]*w[0]
-
-  print det
-
-  if det<0: #this is a property of the det. If the det < 0 then B is clockwise of A
-      print inner
-  else: # if the det > 0 then A is immediately clockwise of B
-      print 360-inner
+    print('shortcut')
+    return True
 
 def get_bulge(edge):
   # print('arc ' + str(edge.startVertex.geometry.asArray()) + ' ' + str(edge.endVertex.geometry.asArray()))
@@ -625,8 +591,8 @@ def start_polyline(dxf, layer):#, colour):
   dxf.append(layer)
   dxf.append(' 66')
   dxf.append('100')
-  # dxf.append(' 70')
-  # dxf.append('1')
+  dxf.append(' 70')
+  dxf.append('1')
   dxf.append(' 10')
   dxf.append('0.0')
   dxf.append(' 20')

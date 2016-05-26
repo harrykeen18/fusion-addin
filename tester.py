@@ -67,9 +67,6 @@ def run(context):
         faces_areas.append(face.area)
         #print(face.area)
 
-        if face.area in range(13, 15):
-          print(face.area)
-
       #find two largest face areas - top and bottom face
       #if both are the same (part with no features)
       #back face is the lower one
@@ -78,18 +75,23 @@ def run(context):
       biggest_area_index = faces_areas.index(biggest_area)
       #print(biggest_area_index)
 
-      next_biggest_area = max(n for n in faces_areas if n != max(faces_areas))
+      temp_area_list = faces_areas
+      temp_area_list[biggest_area_index] = 0.0
+      next_biggest_area = max(temp_area_list) #max(n for n in faces_areas if n != max(faces_areas))
       next_biggest_area_index = faces_areas.index(next_biggest_area)
       #print(next_biggest_area_index)
 
-      if int(biggest_area) == int(next_biggest_area):
+      # print('big ' + str(biggest_area))
+      # print('next ' + str(next_biggest_area))
+
+      if ("%.4f" % biggest_area) == ("%.4f" % next_biggest_area):
         #part with no features on it - take bottom face as one with lowest z value (not great solution as stuff could be orientated in a different place.)
 
         biggest_area_point = all_faces[biggest_area_index].pointOnFace.asArray()
         next_biggest_area_point = all_faces[next_biggest_area_index].pointOnFace.asArray()
 
-        print('1 - ' + str(biggest_area))
-        print('2 - ' + str(next_biggest_area))
+        # print('1 - ' + str(biggest_area))
+        # print('2 - ' + str(next_biggest_area))
 
         if biggest_area_point[2] < next_biggest_area_point[2]:
           
@@ -118,7 +120,7 @@ def run(context):
           #outside profile of part
           #print('outer profile')
 
-          outer_profile = get_outer_profile(loop)
+          outer_profile = get_outer_profile(loop, back = True)
 
           depth = 10 * get_depth(back_face, top_face_point)
 
@@ -136,18 +138,18 @@ def run(context):
               #print('thru hole')
               depth = 10 * get_depth(face, top_face_point)
               center = [i * 10 for i in edge.geometry.center.asArray()]
-              radius = 10 * edge.geometry.radius
+              diam = ("%.1f" % round(20 * edge.geometry.radius, 1))
               #print('hole ' + str(depth))
 
               layer_key = 'TOPHOLES'
               #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
-              layer_name = 'TOP-HOLE-' + str(int(2*radius)) + 'MM-DIAM_' + str(int(depth)) + 'MM'
+              layer_name = 'TOP-HOLE-' + str(diam[0]) + 'MM-DIAM_' + str(int(depth)) + 'MM'
               layer_col = layer_colour(layer_key, depth)
               
               make_model_layer_dict(layer_name, layer_col)
               #print(layer_key, layer_name, layer_col)
 
-              hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
+              hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': diam}
               FEATURE_DICT['HOLES'].append(hole_dict)
 
               break
@@ -156,7 +158,7 @@ def run(context):
               #INSIDE THRU CUT
               #print('thru inside cut')
 
-              outer_profile = get_outer_profile(loop)
+              outer_profile = get_outer_profile(loop, back = True)
 
               depth = 10 * get_depth(back_face, top_face_point)
               layer_key = 'TOPCUTINSIDE'
@@ -194,18 +196,18 @@ def run(context):
 
                   depth = 10 * get_depth(face, top_face_point)
                   center = [i * 10 for i in edge.geometry.center.asArray()]
-                  radius = 10 * edge.geometry.radius
+                  diam = ("%.1f" % round(20 * edge.geometry.radius, 1))
                   #print('hole ' + str(depth))
 
                   layer_key = 'TOPHOLES'
                   #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
-                  layer_name = 'TOP-HOLE-' + str(int(2*radius)) + 'MM-DIAM_' + str(int(depth)) + 'MM'
+                  layer_name = 'TOP-HOLE-' + str(diam[0]) + 'MM-DIAM_' + str(int(depth)) + 'MM'
                   layer_col = layer_colour(layer_key, depth)
                   
                   make_model_layer_dict(layer_name, layer_col)
                   #print(layer_key, layer_name, layer_col)
 
-                  hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': (2*radius)}
+                  hole_dict = {'layer_name': layer_name, 'center': center, 'diameter': diam}
                   FEATURE_DICT['HOLES'].append(hole_dict)
 
                   break
@@ -214,7 +216,7 @@ def run(context):
                   #INSIDE NON THRU CUT
                   #print('inside cut')
 
-                  outer_profile = get_outer_profile(loop)
+                  outer_profile = get_outer_profile(loop, back = False)
 
                   depth = 10 * get_depth(face, top_face_point)
 
@@ -262,25 +264,133 @@ def write_dxf(dxf_list):
     dxf.write("%s\n" % line)
 
 
-def get_outer_profile(loop):
+def get_outer_profile(loop, back):
   outer_profile = []
 
-  for edge in loop.edges:
-    start_point = [i * 10 for i in edge.startVertex.geometry.asArray()]
-    outer_profile.append(start_point)
+  # get the bulge values in the correct vertex. All curves on the back face use start vertex and all non back faces use end vertex.
+  # for edge in loop.edges:
+  for i in range(0,6):
+    edge = loop.edges[i]
+    if back == True:
+      point = [i * 10 for i in edge.startVertex.geometry.asArray()]
+    else:
+      point = [i * 10 for i in edge.endVertex.geometry.asArray()]
+    
+    outer_profile.append(point)
 
+    #got to find out if the curve is clockwise or not 
     if edge.geometry.curveType == 1:
-      bulge = get_bulge(edge)
-      outer_profile[len(outer_profile) - 1].append(bulge)
+         
+      a = edge.startVertex.geometry.asArray()
+      b = edge.endVertex.geometry.asArray()
+      c = outer_profile[len(outer_profile) - 2]
 
-  #outer_profile.append(loop.edges[0].startVertex.geometry.asArray())
+      bulge = get_bulge(edge)
+
+      print(str(edge.body.name))
+      
+      clockwise = bulge_direction(a, b, c)
+
+      if back == True:
+        if clockwise == True:
+          outer_profile[len(outer_profile) - 1].append(bulge)
+        else:
+          outer_profile[len(outer_profile) - 1].append(-bulge)
+      else:
+        if clockwise == True:
+          outer_profile[len(outer_profile) - 1].append(-bulge)
+        else:
+          outer_profile[len(outer_profile) - 1].append(bulge)
+
   
-  #outer_profile.append(outer_profile[0])
-  
-  for n in outer_profile:
-    print(n)
+  # for n in outer_profile:
+  #   print('n - ' + loop.body.name + str(n))
 
   return outer_profile
+
+def bulge_direction(a, b, c):
+  #print(a,b,c)
+
+  #find angle between vectors: if <180 clockwise, >180 anticlockwise
+
+  #  a o<---o c
+  #   /
+  #  /
+  # v
+  # o b
+
+  ab = []
+  ca = []
+  ab_dot_ca = []
+
+  for i, el in enumerate(a):
+    ab.append(10 * b[i] - 10 * a[i])
+  for i, el in enumerate(a):
+    ca.append(10 * a[i] - c[i])
+
+  # print(ab,ca)
+
+  #dot product
+  for i, el in enumerate(ab):
+    ab_dot_ca.append(ab[i] * ca[i])
+
+  #print(ab_dot_ca)
+
+  dot = ab_dot_ca[0] + ab_dot_ca[1] + ab_dot_ca[2]
+
+  # print('dot '+ str(dot))
+
+  mag_ab = math.sqrt(math.pow(ab[0],2) + math.pow(ab[1],2) + math.pow(ab[2],2))
+  mag_ca = math.sqrt(math.pow(ca[0],2) + math.pow(ca[1],2) + math.pow(ca[2],2))
+
+  # print(dot, mag_ca * mag_ab)
+
+  #If v1 = [x1,y1] and v2 = [x2,y2]
+  #a = atan2d( x1*y2 - y1*x2, x1*x2 + y1*y2);
+
+  try:
+    other_theta = math.atan((ca[0] * ab[1] - ab[0] * ca[1]) / (ca[0] * ab[0] + ca[1] * ab[1]))
+    print('other_theta ' + str(other_theta * 360 / (2 * math.pi)))
+  except:
+    other_theta = 0.0
+
+  # theta = math.acos(dot / (mag_ab * mag_ca))
+
+  # theta = theta * 360 / (2 * math.pi)
+
+  # print('theta ' + str(theta))
+
+  # if theta < 180:
+  #   clockwise = True
+  # else:
+  #   clockwise = False
+
+  if other_theta > 0:
+    clockwise = True
+  else:
+    clockwise = False
+
+
+  return clockwise
+
+  v=[ax-cx,ay-cy]
+  w=[bx-ax,by-ay]
+
+  print v
+  print w
+    
+  cosx=(v[0]*w[0]+v[1]*w[1])/(sqrt(v[0]**2+v[1]**2)*sqrt(w[0]**2+w[1]**2))
+  rad=acos(cosx)
+  inner=rad*180/pi # returns degree
+
+  det = v[0]*w[1]-v[1]*w[0]
+
+  print det
+
+  if det<0: #this is a property of the det. If the det < 0 then B is clockwise of A
+      print inner
+  else: # if the det > 0 then A is immediately clockwise of B
+      print 360-inner
 
 def get_bulge(edge):
   # print('arc ' + str(edge.startVertex.geometry.asArray()) + ' ' + str(edge.endVertex.geometry.asArray()))
@@ -291,10 +401,10 @@ def get_bulge(edge):
   Bx = 10 * edge.endVertex.geometry.asArray()[0]
   By = 10 * edge.endVertex.geometry.asArray()[1]
 
-  print('Ax - ' + str(Ax))
-  print('Ay - ' + str(Ay))
-  print('Bx - ' + str(Bx))
-  print('By - ' + str(By))
+  # print('Ax - ' + str(Ax))
+  # print('Ay - ' + str(Ay))
+  # print('Bx - ' + str(Bx))
+  # print('By - ' + str(By))
 
   cenx = 10 * edge.geometry.center.asArray()[0]
   ceny = 10 * edge.geometry.center.asArray()[1]
@@ -303,13 +413,13 @@ def get_bulge(edge):
   dist = ((By - Ay) * cenx - (Bx - Ax) * ceny + Bx * Ay - By * Ax)
   distance = math.sqrt(math.pow((By - Ay), 2) + math.pow((Bx - Ax), 2))
   center_to_line = math.sqrt(math.pow((dist / distance), 2))
-  bulge = - (rad - center_to_line) / (distance / 2)
+  bulge = (rad - center_to_line) / (distance / 2)
 
-  print('radius - ' + str(rad))
-  print('dist - ' + str(dist))
-  print('distance - ' + str(distance))
-  print('center_to_line - ' + str(center_to_line))
-  print('bulge - ' + str(bulge))
+  # print('radius - ' + str(rad))
+  # print('dist - ' + str(dist))
+  # print('distance - ' + str(distance))
+  # print('center_to_line - ' + str(center_to_line))
+  # print('bulge - ' + str(bulge))
 
   return bulge
 
@@ -324,12 +434,10 @@ def add_cut(layer_key, layer_name, depth, outer_profile):
   cut_dict = {'layer_name': layer_name, 'points': outer_profile}
   FEATURE_DICT[layer_key].append(cut_dict)
 
-
 def make_model_layer_dict(layer_name, layer_col):
   if layer_name not in MODEL_LAYER_DICT.keys():
       global MODEL_LAYER_DICT
-      MODEL_LAYER_DICT[layer_name] = layer_col[3]
-
+      MODEL_LAYER_DICT[layer_name] = [str(layer_col[0]) + str(layer_col[1]) + str(layer_col[2]), layer_col[3]]
 
 def layer_colour(layer_key, depth):
 
@@ -374,11 +482,9 @@ def import_xlsx(file_loc):
     #print(col_values_list)
     sheetdict[sheet.cell_value(0, colnum)] = col_values_list
   #print(sheetdict.keys())
-
   #print(sheetdict)
 
   return sheetdict
-
 
 def gen_dxf_list(FEATURE_DICT):
 
@@ -409,35 +515,29 @@ def gen_dxf_list(FEATURE_DICT):
     start_polyline(dxf_list, cuts['layer_name'])#, colour)
     for point in cuts['points']:
       #print(point)
-      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point)
     end_polyline(dxf_list)
 
   for cuts in FEATURE_DICT['TOPCUTOUTSIDE']:
-    #cut_inside_dict = {'layer_name': layer_name, 'points': outer_profile}
-    #colour = str(6)
+
     start_polyline(dxf_list, cuts['layer_name'])#, colour)
     for point in cuts['points']:
       #print(point)
-      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point)
     end_polyline(dxf_list)
 
   for cuts in FEATURE_DICT['TOPPOCKETINSIDE']:
-    #cut_inside_dict = {'layer_name': layer_name, 'points': outer_profile}
-    #colour = str(6)
+
     start_polyline(dxf_list, cuts['layer_name'])#, colour)
     for point in cuts['points']:
       #print(point)
-      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point, str(0.0))
+      dxf_list = add_vertex(dxf_list, cuts['layer_name'], point)
     end_polyline(dxf_list)
 
   dxf_list = end_section(dxf_list)
   dxf_list = end_dxf(dxf_list)
 
-  # for el in dxf_list:
-  #   print(el)
-
   return dxf_list
-
 
 def get_depth(face, top_face_point):
   point = face.pointOnFace
@@ -458,7 +558,6 @@ def end_section(dxf):
 
   return dxf
 
-
 def end_dxf(dxf):
   dxf.append("  0")
   dxf.append("SEQEND")
@@ -466,7 +565,6 @@ def end_dxf(dxf):
   dxf.append("EOF")
 
   return dxf
-
 
 def start_layer(dxf):
   dxf.append('  2')
@@ -490,7 +588,6 @@ def start_layer(dxf):
 
   return dxf
 
-
 def add_layer(dxf, layer_name, layer_colour):
   dxf.append('  0')
   dxf.append('LAYER')
@@ -498,8 +595,11 @@ def add_layer(dxf, layer_name, layer_colour):
   dxf.append(layer_name)
   dxf.append(' 70')
   dxf.append('     0')
-  dxf.append(' 62')
-  dxf.append('   ' + str(layer_colour))
+  dxf.append(' 62') #autocad colour indez
+  dxf.append('   ' + str(layer_colour[1]))
+  # dxf.append(' 420') #rgb value
+  # print(layer_colour[0])
+  # dxf.append(layer_colour[0])  # can't get working...
   dxf.append('  6')
   dxf.append('CONTINUOUS')
 
@@ -512,13 +612,11 @@ def end_layer(dxf):
 
   return dxf
 
-
 def start_entities(dxf):
   dxf.append('  2')
   dxf.append('ENTITIES')
 
   return dxf
-
 
 def start_polyline(dxf, layer):#, colour):
   dxf.append('  0')
@@ -527,8 +625,8 @@ def start_polyline(dxf, layer):#, colour):
   dxf.append(layer)
   dxf.append(' 66')
   dxf.append('100')
-  dxf.append(' 70')
-  dxf.append('1')
+  # dxf.append(' 70')
+  # dxf.append('1')
   dxf.append(' 10')
   dxf.append('0.0')
   dxf.append(' 20')
@@ -538,8 +636,7 @@ def start_polyline(dxf, layer):#, colour):
 
   return dxf
 
-
-def add_vertex(dxf, layer, point, bulge=str(0.0)):
+def add_vertex(dxf, layer, point):
   dxf.append('  0')
   dxf.append('VERTEX')
   dxf.append('  8')
@@ -550,13 +647,12 @@ def add_vertex(dxf, layer, point, bulge=str(0.0)):
   dxf.append(str(point[1]))
   dxf.append(' 30')
   dxf.append(str(point[2]))
-
+  # add bulge if its there
   if len(point) == 4:
     dxf.append(' 42')
     dxf.append(str(point[3]))
 
   return dxf
-
 
 def end_polyline(dxf):
   dxf.append("  0")
@@ -564,18 +660,11 @@ def end_polyline(dxf):
 
   return dxf
 
-
 def add_hole(dxf, diameter, point, layer):
 
   x = point[0]
   y = point[1]
   z = point[2]
-
-  # x = 10 * x
-  # y = 10 * y
-  # z = 10 * z
-
-  #print(x, y, z)
 
   dxf.append("  0")
   dxf.append("CIRCLE")

@@ -238,7 +238,7 @@ def run(context):
         
         n += 1
 
-      print(keys + ' ' + str(n))
+      # print(keys + ' ' + str(n))
     
 
     #print(MODEL_LAYER_DICT)
@@ -265,98 +265,74 @@ def write_dxf(dxf_list):
 
 
 def get_outer_profile(loop, back):
-  outer_profile = []
+  outer_profile_dict = {}
+  counter = 0
 
   # get the bulge values in the correct vertex. All curves on the back face use start vertex and all non back faces use end vertex.
+  # print(loop.edges.count)
   for edge in loop.edges:
-  # for i in range(0,6):
-  #   edge = loop.edges[i]
+  #for i in range(0,loop.edges.count - 1):
+    #edge = loop.edges[i]
     if back == True:
-      point = [i * 10 for i in edge.startVertex.geometry.asArray()]
+      p = edge.startVertex.geometry
+      point = [i * 10 for i in p.asArray()]
     else:
-      point = [i * 10 for i in edge.endVertex.geometry.asArray()]
+      p = edge.endVertex.geometry
+      point = [i * 10 for i in p.asArray()]
     
-    outer_profile.append(point)
-    print(len(outer_profile))
-
-    #got to find out if the curve is clockwise or not 
+    #if theres a bulge make it add bulge factor
     if edge.geometry.curveType == 1:
-         
-      a = edge.startVertex.geometry.asArray()
-      b = edge.endVertex.geometry.asArray()
-      c = outer_profile[len(outer_profile) - 2]
+      point.append(get_bulge(edge))
+      # print(counter, edge.geometry.radius)
 
-      bulge = get_bulge(edge)
+      #if a point has a bulge find out if it should be positive or negative by finding if the point lies on the face or outside the face edge loop. Also dependant on whether it is on the back face, sort this later.
+      point.append(point_in_loop(edge.geometry.center, loop.face))
 
-      print(str(edge.body.name))
-      
-      clockwise = bulge_direction(a, b, c)
-      print(bulge)
+      #print(point)
 
+    outer_profile_dict[counter] = point
+    counter += 1
+
+  #print(outer_profile_dict)
+
+  keys = outer_profile_dict.keys()
+
+  #apply posative or negative bulge dependent on if its on the face and if its on a back face.
+  for key in keys:
+    if len(outer_profile_dict[key]) == 5:
       if back == True:
-        if clockwise == True:
-          outer_profile[len(outer_profile) - 1].append(-bulge)
+        if outer_profile_dict[key][4] == True:
+          outer_profile_dict[key][3] = - outer_profile_dict[key][3]
         else:
-          outer_profile[len(outer_profile) - 1].append(bulge)
+          outer_profile_dict[key][3] = outer_profile_dict[key][3]
       else:
-        if clockwise == True:
-          outer_profile[len(outer_profile) - 1].append(bulge)
+        if outer_profile_dict[key][4] == True:
+          outer_profile_dict[key][3] = outer_profile_dict[key][3]
         else:
-          outer_profile[len(outer_profile) - 1].append(-bulge)
-
+          outer_profile_dict[key][3] = - outer_profile_dict[key][3]
   
   # for n in outer_profile:
   #   print('n - ' + loop.body.name + str(n))
 
+  outer_profile = []
+
+  for key in keys:
+    outer_profile.append(outer_profile_dict[key])
+
+  outer_profile.append([outer_profile[0][0], outer_profile[0][1], outer_profile[0][2]])
+
   return outer_profile
 
-def bulge_direction(a, b, c):
-  #print(a,b,c)
+def point_in_loop(point, face):
 
-  #find angle between vectors: if <180 clockwise, >180 anticlockwise
+  evaluator = face.evaluator
 
-  #  a o<---o c
-  #   /
-  #  /
-  # v
-  # o b
+  (return_value, parameter) = evaluator.getParameterAtPoint(point)
+  #(return_value, projectedPoint) = evaluator.getPointAtParameter(parameter)
 
-  v=[]
-  w=[]
+  return_value = evaluator.isParameterOnFace(parameter)
 
-  for i, el in enumerate(a):
-    w.append(10 * b[i] - 10 * a[i])
-  for i, el in enumerate(a):
-    v.append(10 * a[i] - c[i])
-
-  # print(v)
-  # print(w)
-  
-  try:
-    cosx=(v[0]*w[0]+v[1]*w[1])/(math.sqrt(v[0]**2+v[1]**2)*math.sqrt(w[0]**2+w[1]**2))
-    rad=math.acos(cosx)
-    inner=rad*180/pi # returns degree
-
-    det = v[0]*w[1]-v[1]*w[0]
-
-    # print(det)
-
-    if det<0: #this is a property of the det. If the det < 0 then B is clockwise of A
-      print(inner)
-      angle = inner
-    else: # if the det > 0 then A is immediately clockwise of B
-      print(360-inner)
-      angle = 360-inner
-
-    if angle < 180:
-      clockwise = True
-    else:
-      clockwise = False
-
-    return clockwise
-  except:
-    print('shortcut')
-    return True
+  return return_value
 
 def get_bulge(edge):
   # print('arc ' + str(edge.startVertex.geometry.asArray()) + ' ' + str(edge.endVertex.geometry.asArray()))
@@ -488,7 +464,7 @@ def gen_dxf_list(FEATURE_DICT):
 
     start_polyline(dxf_list, cuts['layer_name'])#, colour)
     for point in cuts['points']:
-      #print(point)
+      # print(point)
       dxf_list = add_vertex(dxf_list, cuts['layer_name'], point)
     end_polyline(dxf_list)
 
@@ -614,7 +590,7 @@ def add_vertex(dxf, layer, point):
   dxf.append(' 30')
   dxf.append(str(point[2]))
   # add bulge if its there
-  if len(point) == 4:
+  if len(point) >= 4:
     dxf.append(' 42')
     dxf.append(str(point[3]))
 

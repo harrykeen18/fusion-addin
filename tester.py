@@ -15,9 +15,6 @@ if not ADDIN_PATH in sys.path:
   sys.path.append(ADDIN_PATH)
 
 from xlrd import open_workbook
-#import numpy
-#import dxfarc
-# import operator
 import math
 
 
@@ -36,11 +33,14 @@ FEATURE_DICT = {'HOLES': [], 'TOPCUTINSIDE': [], 'TOPCUTOUTSIDE': [], 'TOPPOCKET
 # REVPOCKETINSIDE
 LAYER_DICT = {}
 MODEL_LAYER_DICT = {}
+BACK_EDGES_DICT = {}
 
 def run(context):
   
   try:
     global LAYER_DICT
+    global BACK_EDGES_DICT
+    BACK_EDGES_DICT = {}
     LAYER_DICT = import_xlsx(os.path.join(ADDIN_PATH, 'assets', 'LAYERCOLOURS - new.xlsx'))      
     
     app = adsk.core.Application.get()
@@ -125,10 +125,14 @@ def run(context):
           depth = 10 * get_depth(back_face, top_face_point)
 
           layer_key = 'TOPCUTOUTSIDE'
-          #layer_name = 'TOP-HOLE-' + '%.3f' % (2*radius) + 'MM-DIAM_' + '%.3f' % depth + 'MM'
           layer_name = 'TOP-CUT-OUTSIDE-' + str(int(depth)) + 'MM'
 
           add_cut(layer_key, layer_name, depth, outer_profile)
+
+          #add to outprofile 
+          for i, edge in enumerate(loop.edges):
+            BACK_EDGES_DICT[i] = edge
+          #print(BACK_EDGES_DICT)
         
         #inner loops
         else:
@@ -173,9 +177,14 @@ def run(context):
       #top and bottom faces index
       exclude_faces = [biggest_area_index, next_biggest_area_index]
       
+      #print(top_face.geometry.normal.asArray())
+
       for i, face in enumerate(all_faces):
+        #print(i, face.area, face.geometry.normal.asArray())
         if face.geometry.surfaceType == 0: #planar surface
-          if not face.geometry.normal.isEqualTo(top_face.geometry.normal):
+          top = face.geometry.normal.isEqualTo(top_face.geometry.normal)
+          back = face.geometry.normal.isEqualTo(back_face.geometry.normal)
+          if back == False and top == False:
             exclude_faces.append(i)
         else:
           exclude_faces.append(i)
@@ -232,15 +241,12 @@ def run(context):
             else:
               print('some internal feature') #don't need to worry about this.
     
-    for keys in FEATURE_DICT.keys():
-      n = 0
-      for arrays in FEATURE_DICT[keys]:
-        
-        n += 1
-
-      # print(keys + ' ' + str(n))
+    # for keys in FEATURE_DICT.keys():
+    #   n = 0
+    #   for arrays in FEATURE_DICT[keys]:        
+    #     n += 1
+    #   print(keys + ' ' + str(n))
     
-
     #print(MODEL_LAYER_DICT)
 
     dxf_list = gen_dxf_list(FEATURE_DICT)
@@ -251,9 +257,37 @@ def run(context):
     if ui:
       print('Failed:\n{}'.format(traceback.format_exc()))
 
+def online_test(test_edge):
+  for edge in BACK_EDGES_DICT.keys():
+
+    vert_start = BACK_EDGES_DICT[edge].startVertex.geometry.asArray()
+    vert_end = BACK_EDGES_DICT[edge].endVertex.geometry.asArray()
+
+    test_vert_start = test_edge.startVertex.geometry.asArray()
+    test_vert_end = test_edge.endVertex.geometry.asArray()
+
+    a = vert_start[0]
+    b = vert_start[1]
+    x = vert_end[0]
+    y = vert_end[1]
+    m = test_vert_start[0]
+    n = test_vert_start[1]
+
+    test1 = a * (n - y) + m * (y - b) + x * (b - n)
+
+    m = test_vert_end[0]
+    n = test_vert_end[1]
+
+    test2 = a * (n - y) + m * (y - b) + x * (b - n)
+
+    if test1 == 0 and test2 == 0:
+      return True
+    else:
+      return False
+
 
 def write_dxf(dxf_list):
-  file_loc = '/Users/harry/Documents/github/opendesk-on-demand/wip_docs/dxf-ouputs/test.dxf'
+  file_loc = '/Users/harry/Development/opendesk-on-demand/AddIns/Opendesk-dxf-exporter/outputs/test_edges.dxf'
 
   with open(file_loc, "w"):
       pass    
@@ -267,6 +301,8 @@ def write_dxf(dxf_list):
 def get_outer_profile(loop, back):
   outer_profile_dict = {}
   counter = 0
+
+  need_to_trans = False
 
   # get the bulge values in the correct vertex. All curves on the back face use start vertex and all non back faces use end vertex.
   # print(loop.edges.count)
@@ -289,6 +325,27 @@ def get_outer_profile(loop, back):
       point.append(point_in_loop(edge.geometry.center, loop.face))
 
       #print(point)
+
+    #test if last point was translated. if so, apply the same translation. (defined in code below)
+    if need_to_trans == True:
+      need_to_trans = False
+      print(point)
+      for i, coord in enumerate(point):
+        if normal[i] != 0:
+          point[i] = point[i] + normal[i] * 10
+      print(point)
+
+    #test if edge is on the outer profile and translate it in the normal direction of the vertical edge if it is!
+    if online_test(edge):
+      need_to_trans = True
+      print(point)
+      for face in edge.faces:
+        if face != loop.face:
+          normal = face.geometry.normal.asArray()
+          for i, coord in enumerate(point):
+            if normal[i] != 0:
+              point[i] = point[i] + normal[i] * 10
+      print(point)
 
     outer_profile_dict[counter] = point
     counter += 1
